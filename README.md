@@ -1,5 +1,5 @@
 # Ant-Sight_BE
-CAU CSE CD(2) project
+CAU CSE Capstone Project(2) project
 # Stock Data Crawling & Processing Pipeline (Ant-Sight)
 
 A scalable data pipeline system that collects, processes, and stores large-scale stock discussion data from Naver Finance.
