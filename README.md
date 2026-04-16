@@ -59,22 +59,9 @@ This project is designed to handle large-scale data collection and processing by
 ## Project Structure
 
 
-├── crawler/
-crawler.py 
-│ cleaner.py
-│ storage.py
-│ checkpoint.py
-│ pipeline.py
-│ stock_fetcher.py
-│
-├── backend/
-│ PostController.java
-│ PostService.java
-│ PostRepository.java
-│ Post.java
-│ PostDto.java
-│
-└── README.md
+crawler : crawler.py │ cleaner.py │ storage.py │ checkpoint.py │ pipeline.py │ stock_fetcher.py
+backend : PostController.java │ PostService.java │ PostRepository.java │ Post.java │ PostDto.java
+README.md
 
 
 ---
@@ -88,13 +75,18 @@ crawler.py
 
 ---
 
-## Example
+## Results
 
-- Crawled thousands of stock discussion posts
-- Processed and stored structured data via API
-- Built a reliable system with recovery and error handling
+- Crawled data from over 4,000 stock codes
+- Collected thousands of discussion posts across multiple years
+- Successfully stored structured data into PostgreSQL via REST API
+- Achieved stable performance with retry logic and checkpoint recovery
 
 ---
+
+## Why This Project
+
+This project demonstrates the ability to design and implement a scalable data pipeline that connects data collection, processing, and storage systems — a core requirement for AI-driven services.
 
 ## What I Learned
 
