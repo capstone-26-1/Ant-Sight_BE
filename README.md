@@ -60,19 +60,19 @@ This project is designed to handle large-scale data collection and processing by
 
 
 ├── crawler/
-│ ├── crawler.py
-│ ├── cleaner.py
-│ ├── storage.py
-│ ├── checkpoint.py
-│ ├── pipeline.py
-│ └── stock_fetcher.py
+crawler.py 
+│ cleaner.py
+│ storage.py
+│ checkpoint.py
+│ pipeline.py
+│ stock_fetcher.py
 │
 ├── backend/
-│ ├── PostController.java
-│ ├── PostService.java
-│ ├── PostRepository.java
-│ ├── Post.java
-│ └── PostDto.java
+│ PostController.java
+│ PostService.java
+│ PostRepository.java
+│ Post.java
+│ PostDto.java
 │
 └── README.md
 
