@@ -35,7 +35,6 @@ This project is designed to handle large-scale data collection and processing by
 -  Retry logic & timeout handling for robust requests
 -  Checkpoint system for fault tolerance and recovery
 -  Bulk API processing for efficient data storage
--  Duplicate prevention using database constraints
 
 ---
 
@@ -78,7 +77,7 @@ README.md
 ## Results
 
 - Crawled data from over 4,000 stock codes
-- Collected thousands of discussion posts across multiple years
+- Collected maximum 20,000 of discussion posts across multiple years
 - Successfully stored structured data into PostgreSQL via REST API
 - Achieved stable performance with retry logic and checkpoint recovery
 
@@ -108,4 +107,3 @@ GitHub: https://github.com/capstone-26-1/Ant-Sight_BE
 
 - Add data visualization dashboard
 - Integrate machine learning for sentiment analysis
-- Optimize crawling performance with parallel processing
