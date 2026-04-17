@@ -67,42 +67,10 @@ def create_session() -> requests.Session:
     session.headers.update(DEFAULT_HEADERS)
     return session
 
-
-def discover_last_page(stock_code: str, max_probe: int = 5000) -> int:
-    session = create_session()
-    base_url = f"https://finance.naver.com/item/board.naver?code={stock_code}&page={{}}"
-
-    prev_list_url = base_url.format(1)
-    last_valid = 1
-
-    for page in range(1, max_probe + 1):
-        url = base_url.format(page)
-        session.headers["Referer"] = prev_list_url
-
-        res = get_with_retry(session, url)
-        res.encoding = res.apparent_encoding
-
-        if is_blocked_response(res.text):
-            raise RuntimeError(f"차단 응답 감지: page={page}")
-
-        soup = BeautifulSoup(res.text, "html.parser")
-        title_links = soup.select("table.type2 tr td.title a")
-
-        if len(title_links) == 0:
-            return page - 1
-
-        last_valid = page
-        prev_list_url = url
-
-    return last_valid
-
-
 def crawl_stock(stock_code: str, start_page: int = 1, end_page: int | None = None) -> list[dict]:
     session = create_session()
     base_url = f"https://finance.naver.com/item/board.naver?code={stock_code}&page={{}}"
-
-    if end_page is None:
-        end_page = discover_last_page(stock_code)
+    actual_last_page = start_page
 
     results = []
     prev_list_url = base_url.format(max(1, start_page - 1))
@@ -133,6 +101,7 @@ def crawl_stock(stock_code: str, start_page: int = 1, end_page: int | None = Non
 
         if len(title_links) == 0:
             print(f"✅ 마지막 페이지 도달: {page - 1}")
+            actual_last_page = page - 1
             break
 
         page_item_count = 0
@@ -236,4 +205,4 @@ def crawl_stock(stock_code: str, start_page: int = 1, end_page: int | None = Non
 
         prev_list_url = url
 
-    return results
+    return results, actual_last_page

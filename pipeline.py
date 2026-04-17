@@ -1,23 +1,20 @@
 ﻿import argparse
-from crawler import crawl_stock, discover_last_page
+from crawler import crawl_stock
 from cleaner import clean_records
 from storage import save_to_api
 from checkpoint import is_completed, mark_stock_completed, mark_stock_failed
 from stock_fetcher import get_all_stock_codes
 
 
-def run_one_stock(stock_code, api_url, start_page=1, end_page=None, skip_if_complete=False):
+def run_one_stock(stock_code, api_url, start_page=1, end_page=1000, skip_if_complete=True):
     if skip_if_complete and is_completed(stock_code):
         print(f"☑️ 이미 완료된 종목: {stock_code}")
         return
 
     try:
-        if end_page is None:
-            end_page = discover_last_page(stock_code)
-
         print(f"▶ 시작: {stock_code} ({start_page} ~ {end_page})")
 
-        raw_records = crawl_stock(stock_code, start_page=start_page, end_page=end_page)
+        raw_records,actual_last_page  = crawl_stock(stock_code, start_page=start_page, end_page=end_page)
         cleaned = clean_records(raw_records)
 
         if cleaned:
@@ -26,7 +23,7 @@ def run_one_stock(stock_code, api_url, start_page=1, end_page=None, skip_if_comp
         else:
             print(f"⚠ 저장할 데이터 없음: {stock_code}")
 
-        mark_stock_completed(stock_code, end_page)
+        mark_stock_completed(stock_code, actual_last_page)
 
     except Exception as e:
         mark_stock_failed(stock_code, str(e))
@@ -55,8 +52,8 @@ def main():
             stock_code=stock_code,
             api_url=args.api_url,
             start_page=args.start_page,
-            end_page=args.end_page,
-            skip_if_complete=args.skip_if_complete
+            #end_page=args.end_page,
+            #skip_if_complete=args.skip_if_complete
         )
 
 
