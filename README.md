@@ -6,7 +6,7 @@ A scalable data pipeline system that collects, processes, and stores large-scale
 
 ## Overview
 
-My position is designing to handle large-scale data collection and processing by integrating a web crawler, data cleaning pipeline, and backend API server.
+Designed a system for large-scale data collection and processing by integrating a web crawler, data cleaning pipeline, and backend API server.
 
 - Crawls stock discussion data from Naver Finance
 - Processes and cleans raw text data
