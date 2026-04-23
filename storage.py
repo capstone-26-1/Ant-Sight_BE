@@ -1,4 +1,4 @@
-﻿import time
+import time
 import requests
 from typing import List, Dict
 
@@ -22,6 +22,21 @@ def post_batch(batch: List[Dict], url: str, timeout: int = 60) -> requests.Respo
     return requests.post(url, json=payload, timeout=timeout)
 
 
+def _parse_bulk_response(resp: requests.Response, fallback_len: int) -> Dict[str, int]:
+    """
+    Spring BulkResponse({total, inserted, skipped}) 를 파싱.
+    파싱 실패 시 모두 inserted 로 간주(보수적 fallback).
+    """
+    try:
+        body = resp.json()
+        return {
+            "inserted": int(body.get("inserted", 0)),
+            "skipped":  int(body.get("skipped", 0)),
+        }
+    except Exception:
+        return {"inserted": fallback_len, "skipped": 0}
+
+
 def try_post_with_retry(
     batch: List[Dict],
     url: str,
@@ -30,7 +45,7 @@ def try_post_with_retry(
 ) -> requests.Response:
     last_resp = None
 
-    for attempt in range(1, retries + 2):  # 최초 1회 + 재시도 retries회
+    for attempt in range(1, retries + 2):
         try:
             resp = post_batch(batch, url)
             print(f"📥 status={resp.status_code}")
@@ -55,14 +70,15 @@ def isolate_and_save(
     batch: List[Dict],
     url: str,
     min_split_size: int = 1,
-) -> int:
+) -> Dict[str, int]:
     """
     실패한 배치를 반으로 나눠 재귀 저장.
-    성공적으로 저장된 건수를 반환.
+    {"inserted": N, "skipped": N, "failed": N} 반환.
     """
+    empty = {"inserted": 0, "skipped": 0, "failed": 0}
 
     if not batch:
-        return 0
+        return empty
 
     print(f"🔎 분할 저장 시도 ({len(batch)}건)")
     print_sample("[SPLIT SAMPLE]", batch[0])
@@ -70,23 +86,20 @@ def isolate_and_save(
     resp = try_post_with_retry(batch, url, retries=1, delay=0.8)
 
     if resp is not None and resp.status_code < 400:
-        inserted = len(batch)
-        print(f"✅ 분할 배치 저장 성공 ({inserted}건)")
-        return inserted
+        parsed = _parse_bulk_response(resp, fallback_len=len(batch))
+        print(f"✅ 분할 배치 저장 성공 (inserted={parsed['inserted']}, skipped={parsed['skipped']})")
+        return {**parsed, "failed": 0}
 
     if len(batch) <= min_split_size:
         print("❌ 최종 실패 레코드:")
         print_sample("[BAD RECORD]", batch[0])
-        return 0
+        return {"inserted": 0, "skipped": 0, "failed": len(batch)}
 
     mid = len(batch) // 2
-    left = batch[:mid]
-    right = batch[mid:]
+    left  = isolate_and_save(batch[:mid], url, min_split_size=min_split_size)
+    right = isolate_and_save(batch[mid:], url, min_split_size=min_split_size)
 
-    saved_left = isolate_and_save(left, url, min_split_size=min_split_size)
-    saved_right = isolate_and_save(right, url, min_split_size=min_split_size)
-
-    return saved_left + saved_right
+    return {k: left[k] + right[k] for k in ("inserted", "skipped", "failed")}
 
 
 def save_to_api(
@@ -95,14 +108,20 @@ def save_to_api(
     batch_size: int = 50,
     retries: int = 2,
     retry_delay: float = 1.0,
-) -> None:
+) -> Dict[str, int]:
+    """
+    {"total": N, "inserted": N, "skipped": N, "failed": N} 반환.
+    - inserted: 실제로 DB에 새로 들어간 건수
+    - skipped : (stock_code + title + timestamp) 중복으로 스킵된 건수
+    - failed  : 서버 오류/유효성 실패로 끝내 저장 못 한 건수
+    """
+    stats = {"total": len(records), "inserted": 0, "skipped": 0, "failed": 0}
+
     if not records:
         print("⚠️ 저장할 데이터 없음")
-        return
+        return stats
 
     url = f"{api_base_url.rstrip('/')}/posts/bulk"
-    total = len(records)
-    saved_total = 0
 
     for idx, batch in enumerate(chunked(records, batch_size), start=1):
         print(f"📡 POST {url} - batch {idx} ({len(batch)}건)")
@@ -116,18 +135,29 @@ def save_to_api(
         )
 
         if resp is not None and resp.status_code < 400:
-            saved_total += len(batch)
-            print(f"✅ batch {idx} 저장 완료 / 누적 {saved_total}/{total}")
+            parsed = _parse_bulk_response(resp, fallback_len=len(batch))
+            stats["inserted"] += parsed["inserted"]
+            stats["skipped"]  += parsed["skipped"]
+            print(
+                f"✅ batch {idx} 저장 완료 "
+                f"(inserted={parsed['inserted']}, skipped={parsed['skipped']}) / "
+                f"누적 inserted={stats['inserted']}, skipped={stats['skipped']}"
+            )
             continue
 
         print(f"🚨 batch {idx} 실패 - 분할 저장 시작")
-        saved = isolate_and_save(batch, url, min_split_size=1)
-        saved_total += saved
+        split = isolate_and_save(batch, url, min_split_size=1)
+        stats["inserted"] += split["inserted"]
+        stats["skipped"]  += split["skipped"]
+        stats["failed"]   += split["failed"]
 
-        if saved < len(batch):
-            failed_count = len(batch) - saved
-            print(f"⚠️ 일부 레코드 실패: {failed_count}건 (skip)")
+        if split["failed"] > 0:
+            print(f"⚠️ 일부 레코드 실패: {split['failed']}건 (skip)")
 
-        print(f"✅ batch {idx} 분할 저장 완료 / 누적 {saved_total}/{total}")
-
-    print(f"✅ API 저장 완료: 총 {saved_total}건")
+    print(
+        f"✅ API 저장 완료: 총 {stats['total']}건 / "
+        f"inserted {stats['inserted']}건 / "
+        f"skipped(중복) {stats['skipped']}건 / "
+        f"failed {stats['failed']}건"
+    )
+    return stats
