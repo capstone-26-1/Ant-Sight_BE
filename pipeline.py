@@ -2,9 +2,13 @@ import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+# .env 자동 로드 (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME)
+from dotenv import load_dotenv
+load_dotenv()
+
 from crawler import crawl_stock, crawl_stock_incremental
 from cleaner import clean_records
-from storage import save_to_api
+from storage import save_to_db
 from checkpoint import is_completed, mark_stock_completed, mark_stock_failed
 from stock_fetcher import get_all_stock_codes
 
@@ -14,7 +18,6 @@ DEFAULT_END_PAGE = 1000
 
 def run_full(
     stock_code: str,
-    api_url: str,
     start_page: int = 1,
     end_page: int = DEFAULT_END_PAGE,
     skip_if_complete: bool = True,
@@ -33,7 +36,7 @@ def run_full(
         cleaned = clean_records(raw_records)
 
         if cleaned:
-            stats = save_to_api(cleaned, api_url)
+            stats = save_to_db(cleaned)
             print(
                 f"✅ 저장 완료: {stock_code} / "
                 f"크롤링 {stats['total']}건 → "
@@ -53,7 +56,6 @@ def run_full(
 
 def run_incremental(
     stock_code: str,
-    api_url: str,
     cutoff: datetime,
     max_pages: int = 5,
 ) -> None:
@@ -65,7 +67,7 @@ def run_incremental(
         cleaned = clean_records(raw_records)
 
         if cleaned:
-            stats = save_to_api(cleaned, api_url)
+            stats = save_to_db(cleaned)
             print(
                 f"✅ [INCR] {stock_code} / "
                 f"신규 {stats['total']}건 → "
@@ -83,7 +85,7 @@ def run_incremental(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="네이버 종토방 크롤링 → 정제 → API 저장 파이프라인"
+        description="네이버 종토방 크롤링 → 정제 → RDS 직접 저장 파이프라인"
     )
     parser.add_argument(
         "--mode",
@@ -94,11 +96,6 @@ def main():
     parser.add_argument(
         "--code",
         help="단일 종목코드 (예: 005930). 미지정 시 stock_codes.csv 전체 실행",
-    )
-    parser.add_argument(
-        "--api-url",
-        default="http://localhost:7689",
-        help="Spring API base URL",
     )
 
     # full mode 전용 옵션
@@ -132,7 +129,6 @@ def main():
         for stock_code in stock_codes:
             run_incremental(
                 stock_code=stock_code,
-                api_url=args.api_url,
                 cutoff=cutoff,
                 max_pages=args.max_pages,
             )
@@ -143,7 +139,6 @@ def main():
         for stock_code in stock_codes:
             run_full(
                 stock_code=stock_code,
-                api_url=args.api_url,
                 start_page=args.start_page,
                 end_page=args.end_page,
                 skip_if_complete=args.skip_if_complete,

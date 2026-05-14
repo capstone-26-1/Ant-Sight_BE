@@ -1,163 +1,157 @@
-import time
-import requests
-from typing import List, Dict
+"""
+storage.py - 크롤링 데이터를 RDS에 직접 INSERT.
+
+DataManager 클래스로 검증, 트랜잭션, 로깅을 캡슐화.
+이전 버전의 save_to_api / try_post_with_retry / isolate_and_save 대체.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import contextmanager
+from typing import Dict, List, Optional
+
+import pymysql
+from pymysql.cursors import DictCursor
+
+logger = logging.getLogger(__name__)
 
 
-def chunked(seq, size):
-    for i in range(0, len(seq), size):
-        yield seq[i:i + size]
-
-
-def print_sample(prefix: str, record: Dict) -> None:
-    print(prefix)
-    print("title =", record.get("title"))
-    print("writer =", record.get("writer"))
-    print("timestamp =", record.get("timestamp"))
-    print("comments =", record.get("comments"))
-    print("text =", str(record.get("text", ""))[:150])
-
-
-def post_batch(batch: List[Dict], url: str, timeout: int = 60) -> requests.Response:
-    payload = {"posts": batch}
-    return requests.post(url, json=payload, timeout=timeout)
-
-
-def _parse_bulk_response(resp: requests.Response, fallback_len: int) -> Dict[str, int]:
+class DataManager:
     """
-    Spring BulkResponse({total, inserted, skipped}) 를 파싱.
-    파싱 실패 시 모두 inserted 로 간주(보수적 fallback).
+    posts 테이블 INSERT 전담 매니저.
+
+    - 환경변수에서 DB 접속 정보 읽음 (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME)
+    - 각 글마다 try/except로 unique 위반 = skip
+    - bulk 결과 카운트 반환 (이전 save_to_api와 동일 시그니처)
     """
-    try:
-        body = resp.json()
-        return {
-            "inserted": int(body.get("inserted", 0)),
-            "skipped":  int(body.get("skipped", 0)),
+
+    def __init__(
+        self,
+        host: Optional[str] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        db: Optional[str] = None,
+        port: int = 3306,
+    ):
+        self.config = {
+            "host":     host     or os.environ["DB_HOST"],
+            "user":     user     or os.environ["DB_USER"],
+            "password": password or os.environ["DB_PASSWORD"],
+            "db":       db       or os.environ.get("DB_NAME", "stockboard"),
+            "port":     port,
+            "charset":  "utf8mb4",
+            "cursorclass": DictCursor,
         }
-    except Exception:
-        return {"inserted": fallback_len, "skipped": 0}
 
-
-def try_post_with_retry(
-    batch: List[Dict],
-    url: str,
-    retries: int = 2,
-    delay: float = 1.0,
-) -> requests.Response:
-    last_resp = None
-
-    for attempt in range(1, retries + 2):
+    @contextmanager
+    def _connection(self):
+        """pymysql 연결을 컨텍스트 매니저로 감쌈. 종료 시 자동 close."""
+        conn = pymysql.connect(**self.config)
         try:
-            resp = post_batch(batch, url)
-            print(f"📥 status={resp.status_code}")
-            print(f"📥 body={resp.text[:500]}")
+            yield conn
+        finally:
+            conn.close()
 
-            if resp.status_code < 500:
-                return resp
+    def save_posts(self, posts: List[Dict]) -> Dict[str, int]:
+        """
+        벌크 저장. 한 건씩 독립 트랜잭션으로 처리.
+        중복(unique 위반)은 skip 카운트.
 
-            last_resp = resp
-            print(f"⚠️ 서버 오류, 재시도 예정 ({attempt}/{retries + 1})")
+        Returns:
+            {"total": N, "inserted": M, "skipped": K, "failed": J}
+        """
+        if not posts:
+            return {"total": 0, "inserted": 0, "skipped": 0, "failed": 0}
 
-        except requests.RequestException as e:
-            print(f"⚠️ 요청 예외 ({attempt}/{retries + 1}): {repr(e)}")
+        inserted = 0
+        skipped = 0
+        failed = 0
 
-        if attempt < retries + 1:
-            time.sleep(delay)
+        for post in posts:
+            try:
+                if self._save_one(post):
+                    inserted += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                logger.error(f"INSERT 실패: {e} | post={post.get('title', '?')[:30]}")
+                failed += 1
 
-    return last_resp
-
-
-def isolate_and_save(
-    batch: List[Dict],
-    url: str,
-    min_split_size: int = 1,
-) -> Dict[str, int]:
-    """
-    실패한 배치를 반으로 나눠 재귀 저장.
-    {"inserted": N, "skipped": N, "failed": N} 반환.
-    """
-    empty = {"inserted": 0, "skipped": 0, "failed": 0}
-
-    if not batch:
-        return empty
-
-    print(f"🔎 분할 저장 시도 ({len(batch)}건)")
-    print_sample("[SPLIT SAMPLE]", batch[0])
-
-    resp = try_post_with_retry(batch, url, retries=1, delay=0.8)
-
-    if resp is not None and resp.status_code < 400:
-        parsed = _parse_bulk_response(resp, fallback_len=len(batch))
-        print(f"✅ 분할 배치 저장 성공 (inserted={parsed['inserted']}, skipped={parsed['skipped']})")
-        return {**parsed, "failed": 0}
-
-    if len(batch) <= min_split_size:
-        print("❌ 최종 실패 레코드:")
-        print_sample("[BAD RECORD]", batch[0])
-        return {"inserted": 0, "skipped": 0, "failed": len(batch)}
-
-    mid = len(batch) // 2
-    left  = isolate_and_save(batch[:mid], url, min_split_size=min_split_size)
-    right = isolate_and_save(batch[mid:], url, min_split_size=min_split_size)
-
-    return {k: left[k] + right[k] for k in ("inserted", "skipped", "failed")}
-
-
-def save_to_api(
-    records: List[Dict],
-    api_base_url: str,
-    batch_size: int = 50,
-    retries: int = 2,
-    retry_delay: float = 1.0,
-) -> Dict[str, int]:
-    """
-    {"total": N, "inserted": N, "skipped": N, "failed": N} 반환.
-    - inserted: 실제로 DB에 새로 들어간 건수
-    - skipped : (stock_code + title + timestamp) 중복으로 스킵된 건수
-    - failed  : 서버 오류/유효성 실패로 끝내 저장 못 한 건수
-    """
-    stats = {"total": len(records), "inserted": 0, "skipped": 0, "failed": 0}
-
-    if not records:
-        print("⚠️ 저장할 데이터 없음")
-        return stats
-
-    url = f"{api_base_url.rstrip('/')}/posts/bulk"
-
-    for idx, batch in enumerate(chunked(records, batch_size), start=1):
-        print(f"📡 POST {url} - batch {idx} ({len(batch)}건)")
-        print_sample("[PAYLOAD DEBUG]", batch[0])
-
-        resp = try_post_with_retry(
-            batch=batch,
-            url=url,
-            retries=retries,
-            delay=retry_delay,
+        logger.info(
+            f"✅ DB 저장 완료: 총 {len(posts)}건 / "
+            f"inserted {inserted}건 / skipped(중복) {skipped}건 / failed {failed}건"
         )
 
-        if resp is not None and resp.status_code < 400:
-            parsed = _parse_bulk_response(resp, fallback_len=len(batch))
-            stats["inserted"] += parsed["inserted"]
-            stats["skipped"]  += parsed["skipped"]
-            print(
-                f"✅ batch {idx} 저장 완료 "
-                f"(inserted={parsed['inserted']}, skipped={parsed['skipped']}) / "
-                f"누적 inserted={stats['inserted']}, skipped={stats['skipped']}"
-            )
-            continue
+        return {
+            "total":    len(posts),
+            "inserted": inserted,
+            "skipped":  skipped,
+            "failed":   failed,
+        }
 
-        print(f"🚨 batch {idx} 실패 - 분할 저장 시작")
-        split = isolate_and_save(batch, url, min_split_size=1)
-        stats["inserted"] += split["inserted"]
-        stats["skipped"]  += split["skipped"]
-        stats["failed"]   += split["failed"]
+    def _save_one(self, post: Dict) -> bool:
+        """
+        한 건 저장. 중복이면 False, 성공이면 True.
+        다른 예외는 호출자에게 raise.
+        """
+        sql = """
+            INSERT INTO posts
+              (stock_code, title, writer, timestamp, text,
+               views, likes, dislikes, comments)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            post.get("stock_code"),
+            post.get("title"),
+            post.get("writer", "unknown"),
+            post.get("timestamp"),
+            post.get("text", ""),
+            int(post.get("views", 0)),
+            int(post.get("likes", 0)),
+            int(post.get("dislikes", 0)),
+            int(post.get("comments", 0)),
+        )
 
-        if split["failed"] > 0:
-            print(f"⚠️ 일부 레코드 실패: {split['failed']}건 (skip)")
+        with self._connection() as conn:
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, params)
+                conn.commit()
+                return True
+            except pymysql.err.IntegrityError as e:
+                # 1062 = Duplicate entry. 그 외 무결성 위반은 다시 raise.
+                if e.args and e.args[0] == 1062:
+                    conn.rollback()
+                    return False
+                conn.rollback()
+                raise
 
-    print(
-        f"✅ API 저장 완료: 총 {stats['total']}건 / "
-        f"inserted {stats['inserted']}건 / "
-        f"skipped(중복) {stats['skipped']}건 / "
-        f"failed {stats['failed']}건"
-    )
-    return stats
+
+# ─── 외부 호환 헬퍼 ────────────────────────────────────────────────
+# 기존 pipeline.py가 save_to_api(batch, url)로 호출했다면, 점진적 전환을 위해
+# 같은 시그니처로 살려둘 수 있음. 새 코드는 DataManager를 직접 쓰는 게 권장.
+
+_default_manager: Optional[DataManager] = None
+
+
+def _get_default_manager() -> DataManager:
+    global _default_manager
+    if _default_manager is None:
+        _default_manager = DataManager()
+    return _default_manager
+
+
+def save_to_db(batch: List[Dict]) -> Dict[str, int]:
+    """기존 save_to_api 자리에 그대로 대체할 수 있는 함수 형태."""
+    return _get_default_manager().save_posts(batch)
+
+
+def isolate_and_save(batch: List[Dict]) -> Dict[str, int]:
+    """
+    이전 isolate_and_save와 동일한 시그니처 유지.
+    하지만 save_posts가 이미 건별 트랜잭션이라 분할 재귀 불필요.
+    같은 결과 반환.
+    """
+    return _get_default_manager().save_posts(batch)
