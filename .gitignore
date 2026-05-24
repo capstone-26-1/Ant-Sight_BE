@@ -1,3 +1,11 @@
-"application.properties" 
-"__pycache__/" 
-"*.pyc" 
+application.properties
+application-prod.yml
+application-local.yml
+__pycache__/
+*.pyc
+Ant-Sight_BE.zip
+backend.zip
+.env
+*.env
+envfile.zip
+.claude/
