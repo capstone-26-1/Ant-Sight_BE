@@ -1,0 +1,24 @@
+# 자격증명
+db_config.json
+*.env
+*credentials*
+
+# 모델 가중치 (압축으로 별도 전달받음)
+models/model_a_v2/
+models/model_b/
+*.pt
+*.joblib
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
