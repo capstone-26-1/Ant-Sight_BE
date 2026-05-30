@@ -29,7 +29,7 @@ public class AntIndexService {
                 view.getTicker(),
                 view.getTimestamp(),
                 view.getScore(),
-                Sentiment.valueOf(view.getSentiment()),
+                Sentiment.fromScore(view.getScore().doubleValue()),
                 view.getPostCount() == null ? 0L : view.getPostCount());
     }
 

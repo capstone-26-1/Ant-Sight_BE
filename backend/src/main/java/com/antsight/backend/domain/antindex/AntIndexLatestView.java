@@ -7,6 +7,5 @@ public interface AntIndexLatestView {
     String getTicker();
     LocalDateTime getTimestamp();
     BigDecimal getScore();
-    String getSentiment();
     Long getPostCount();
 }
