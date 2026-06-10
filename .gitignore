@@ -8,4 +8,5 @@ backend.zip
 .env
 *.env
 envfile.zip
+backend_*.zip
 .claude/

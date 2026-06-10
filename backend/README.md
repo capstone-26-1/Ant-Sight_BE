@@ -18,11 +18,12 @@ Spring Boot 기반 주식 정보 서비스 백엔드입니다.
 
 | 변수명 | 설명 | 로컬 기본값 |
 |--------|------|------------|
-| `DB_PASSWORD` | MySQL 비밀번호 | `local_dev_password` |
-| `JWT_SECRET` | JWT 서명 키 (32자 이상) | `antsight-dev-secret-key-must-be-at-least-32-bytes` |
+| `DB_PASSWORD` | MySQL 비밀번호 | (직접 설정) |
+| `JWT_SECRET` | JWT 서명 키 (32자 이상) | (직접 설정) |
 | `CORS_ORIGINS` | 허용할 프론트엔드 출처 (콤마 구분) | `http://localhost:3000` |
+| `ADMIN_INITIAL_PASSWORD` | 초기 관리자 비밀번호 (8자 이상). 미설정 시 관리자 자동 생성 스킵 | (직접 설정) |
 
-> 로컬에서는 위 변수를 생략해도 기본값으로 구동됩니다.
+> 모든 시크릿은 `.env` 또는 OS 환경변수로 주입하세요. 평문 커밋 금지.
 
 ### 실행
 
@@ -34,13 +35,15 @@ Spring Boot 기반 주식 정보 서비스 백엔드입니다.
 
 ### 초기 관리자 계정
 
-서버 최초 구동 시 자동 생성됩니다.
+`ADMIN_INITIAL_PASSWORD` 환경변수가 주입된 상태로 서버 최초 구동 시 자동 생성됩니다.
 
 | 항목 | 값 |
 |------|----|
 | email | admin@antsight.com |
-| password | Admin2026! |
+| password | `ADMIN_INITIAL_PASSWORD` ENV 값 |
 | role | ADMIN |
+
+> ENV 미설정 시 관리자 자동 생성은 스킵됩니다 (로그에 경고).
 
 ---
 
@@ -55,6 +58,8 @@ DB_PASSWORD=your_db_password
 JWT_SECRET=your-32-chars-or-longer-secret-key
 
 CORS_ORIGINS=https://your-frontend.com
+
+ADMIN_INITIAL_PASSWORD=your-strong-initial-admin-password
 ```
 
 > `JWT_SECRET`은 반드시 32바이트 이상이어야 합니다.

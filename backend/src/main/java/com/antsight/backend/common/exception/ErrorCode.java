@@ -17,7 +17,10 @@ public enum ErrorCode {
     CANNOT_BLOCK_SELF(HttpStatus.BAD_REQUEST, "자기 자신을 차단할 수 없습니다."),
     ANT_INDEX_NOT_FOUND(HttpStatus.NOT_FOUND, "해당 종목의 개미지수 데이터가 없습니다."),
     INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "from 이 to 보다 이후입니다."),
-    DATE_RANGE_TOO_LARGE(HttpStatus.BAD_REQUEST, "조회 기간이 너무 깁니다. 최대 7일까지 허용됩니다.");
+    DATE_RANGE_TOO_LARGE(HttpStatus.BAD_REQUEST, "조회 기간이 너무 깁니다. 최대 7일까지 허용됩니다."),
+    VOLJUMP_NOT_FOUND(HttpStatus.NOT_FOUND, "해당 종목의 변동성 경보 데이터가 없습니다."),
+    VOLJUMP_INVALID_PARAM(HttpStatus.BAD_REQUEST, "min_prob 또는 limit 범위가 잘못되었습니다."),
+    VOLJUMP_INVALID_DAYS(HttpStatus.BAD_REQUEST, "days 는 1~90 범위여야 합니다.");
 
     private final HttpStatus status;
     private final String message;

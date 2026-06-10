@@ -4,6 +4,7 @@ import com.antsight.backend.config.KisProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
@@ -22,12 +23,15 @@ public class KisTokenService {
     // KIS는 토큰 발급을 앱키당 1분에 1회로 제한(EGW00133).
     // 콜드 스타트/만료 직후 동시 요청이 KIS를 동시에 때리지 않도록 인스턴스 내 쿨다운 적용.
     private static final long TOKEN_ISSUE_COOLDOWN_MS = 60_000L;
+    // MySQL GET_LOCK 대기 시간(초). 동일 앱키를 공유하는 외부 프로세스(예: 로컬 트레이딩)와의 동시 발급을 차단.
+    private static final int DB_LOCK_TIMEOUT_SEC = 5;
     private final Object tokenIssueLock = new Object();
     private long lastIssueAttemptMillis = 0L;
 
     private final KisTokenRepository kisTokenRepository;
     private final KisProperties kisProperties;
     private final RestClient restClient;
+    private final JdbcTemplate jdbcTemplate;
 
     @Transactional
     public String getValidToken() {
@@ -64,8 +68,37 @@ public class KisTokenService {
                 throw new KisTokenCooldownException(retryAfterSec);
             }
 
-            lastIssueAttemptMillis = now;
-            return issueAndSave();
+            String lockName = "kis_token_" + kisProperties.getEnvironment();
+            if (!tryAcquireDbLock(lockName)) {
+                log.warn("[KIS] DB 락 획득 실패 — 타 프로세스 발급 중일 가능성, {}초 후 재시도", DB_LOCK_TIMEOUT_SEC);
+                throw new KisTokenCooldownException(DB_LOCK_TIMEOUT_SEC);
+            }
+            try {
+                Optional<KisToken> freshAfterDbLock = kisTokenRepository.findByEnvironment(kisProperties.getEnvironment())
+                        .filter(KisToken::isValid);
+                if (freshAfterDbLock.isPresent()) {
+                    log.info("[KIS] DB 락 획득 중 타 프로세스가 토큰을 발급함 — 재사용");
+                    return freshAfterDbLock.get();
+                }
+                lastIssueAttemptMillis = now;
+                return issueAndSave();
+            } finally {
+                releaseDbLock(lockName);
+            }
+        }
+    }
+
+    private boolean tryAcquireDbLock(String lockName) {
+        Integer result = jdbcTemplate.queryForObject(
+                "SELECT GET_LOCK(?, ?)", Integer.class, lockName, DB_LOCK_TIMEOUT_SEC);
+        return result != null && result == 1;
+    }
+
+    private void releaseDbLock(String lockName) {
+        try {
+            jdbcTemplate.queryForObject("SELECT RELEASE_LOCK(?)", Integer.class, lockName);
+        } catch (Exception e) {
+            log.warn("[KIS] DB 락 해제 실패 (lock={}): {}", lockName, e.getMessage());
         }
     }
 
